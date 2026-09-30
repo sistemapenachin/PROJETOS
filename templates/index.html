@@ -1,0 +1,1090 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>PCP — Planejamento e Controle de Projetos</title>
+
+<!-- Tailwind CSS -->
+<script src="https://cdn.tailwindcss.com"></script>
+
+<!-- FullCalendar.js -->
+<link href="https://cdnjs.cloudflare.com/ajax/libs/fullcalendar/6.1.11/index.global.min.css" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/fullcalendar/6.1.11/index.global.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/fullcalendar/6.1.11/locales-all.global.min.js"></script>
+
+<!-- Frappe Gantt -->
+<link href="https://cdnjs.cloudflare.com/ajax/libs/frappe-gantt/1.2.1/frappe-gantt.min.css" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/frappe-gantt/1.2.1/frappe-gantt.umd.min.js"></script>
+
+<style>
+  .status-badge { display:inline-flex; align-items:center; padding:2px 10px; border-radius:9999px; font-size:.75rem; font-weight:600; white-space:nowrap; }
+  .status-Planejada { background:#e5e7eb; color:#374151; }
+  .status-Pendente { background:#e5e7eb; color:#374151; }
+  .status-Em-Andamento { background:#e0e7ff; color:#4338ca; }
+  .status-Concluído { background:#dcfce7; color:#15803d; }
+  .status-Atrasado { background:#fee2e2; color:#b91c1c; }
+  .fc-event { cursor:pointer; border:none !important; }
+  .fc .fc-toolbar-title { font-size: 1.1rem; }
+
+  .tab-btn { border-radius: 0.5rem; }
+  .tab-btn.active { background:#4f46e5; color:#fff; }
+  .tab-btn:not(.active) { color:#64748b; }
+  .tab-btn:not(.active):hover { background:#e2e8f0; }
+
+  .cron-view-btn { border-radius: 0.375rem; }
+  .cron-view-btn.active { background:#4f46e5; color:#fff; }
+  .cron-view-btn:not(.active) { color:#64748b; }
+  .cron-view-btn:not(.active):hover { background:#e2e8f0; }
+
+  /* Frappe Gantt: ajustes visuais para combinar com o restante da interface */
+  .gantt .bar-label { fill:#1e293b; font-family: inherit; }
+  .gantt .grid-header { fill:#f8fafc; }
+  .gantt-container { overflow:auto; }
+  .gantt-container .popup-wrapper { font-family: inherit; }
+
+  .projeto-card { border-top-width: 4px; cursor:pointer; transition: box-shadow .15s, transform .1s; }
+  .projeto-card:hover { box-shadow: 0 4px 14px rgba(0,0,0,.08); }
+  .projeto-card.selecionado { outline: 2px solid #4f46e5; outline-offset: 2px; }
+
+  .progress-track { background:#e5e7eb; border-radius:9999px; overflow:hidden; height:8px; width:100%; }
+  .progress-track.sm { height:6px; }
+  .progress-fill { height:100%; border-radius:9999px; transition: width .2s; }
+
+  .icon-btn { display:inline-flex; align-items:center; justify-content:center; width:28px; height:28px; border-radius:6px; color:#64748b; }
+  .icon-btn:hover { background:#f1f5f9; color:#0f172a; }
+  .icon-btn.danger:hover { background:#fee2e2; color:#b91c1c; }
+
+  .dep-badge { display:inline-flex; align-items:center; padding:1px 8px; border-radius:9999px; font-size:.65rem; font-weight:500; background:#f1f5f9; color:#64748b; margin-left:6px; }
+</style>
+</head>
+<body class="bg-slate-100 min-h-screen text-slate-800">
+
+<div class="max-w-7xl mx-auto p-4 md:p-6">
+
+  <!-- Header -->
+  <header class="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-6">
+    <div class="flex items-center gap-3">
+      <div class="w-11 h-11 rounded-xl bg-indigo-600 text-white flex items-center justify-center text-xl shrink-0">🏗️</div>
+      <div>
+        <h1 class="text-xl md:text-2xl font-bold text-slate-900">PCP — Planejamento e Controle de Projetos</h1>
+        <p class="text-sm text-slate-500">Projetos, tarefas e cronograma integrado</p>
+      </div>
+    </div>
+    <div>
+      <button id="btnNovoProjeto" class="bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium px-4 py-2 rounded-lg shadow-sm transition">
+        + Novo projeto
+      </button>
+    </div>
+  </header>
+
+  <!-- Tabs -->
+  <div class="inline-flex gap-1 mb-5 bg-slate-200/60 p-1 rounded-lg">
+    <button data-tab="projetos" class="tab-btn active px-4 py-2 text-sm font-semibold transition">Projetos</button>
+    <button data-tab="calendario" class="tab-btn px-4 py-2 text-sm font-semibold transition">Cronograma Geral</button>
+    <button data-tab="tarefas" class="tab-btn px-4 py-2 text-sm font-semibold transition">Painel de Controle</button>
+  </div>
+
+  <!-- ABA PROJETOS -->
+  <section id="tab-projetos" class="tab-content">
+    <div id="gradeProjetos" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4"></div>
+
+    <!-- DETALHES DO PROJETO (exibido ao clicar em um card) -->
+    <section id="detalhesProjeto" class="hidden mt-6">
+      <div class="bg-white rounded-xl shadow-sm p-4 mb-4">
+        <div class="flex items-start justify-between gap-3 mb-4">
+          <div>
+            <h2 class="text-xl font-bold text-slate-900 flex items-center gap-2">
+              <span id="detProjDot" class="inline-block w-2.5 h-2.5 rounded-full"></span>
+              <span id="detProjNome"></span>
+            </h2>
+            <p class="text-sm text-slate-500 mt-1">
+              <span id="detProjResponsavel"></span> · <span id="detProjPeriodo"></span>
+            </p>
+          </div>
+          <div class="flex flex-wrap items-center justify-end gap-2 shrink-0">
+            <div class="inline-flex rounded-lg border border-slate-300 overflow-hidden" title="Baixar o Gantt deste projeto">
+              <button id="btnGanttPng" class="text-slate-700 hover:bg-slate-50 text-sm font-medium px-3 py-2 transition">⬇ Gantt (PNG)</button>
+              <button id="btnGanttSvg" class="text-slate-700 hover:bg-slate-50 text-sm font-medium px-3 py-2 border-l border-slate-300 transition">SVG</button>
+            </div>
+            <button id="btnEditarProjetoDetalhe" class="border border-slate-300 hover:bg-slate-50 text-slate-700 text-sm font-medium px-3 py-2 rounded-lg transition">
+              Editar projeto
+            </button>
+            <button id="btnNovaTarefaDetalhe" class="bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium px-4 py-2 rounded-lg shadow-sm transition">
+              + Nova tarefa
+            </button>
+            <button onclick="fecharDetalhesProjeto()" class="icon-btn" title="Fechar">✕</button>
+          </div>
+        </div>
+
+        <!-- Stats cards -->
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div class="bg-slate-50 rounded-lg p-3">
+            <p class="text-xs text-slate-500">Tarefas</p>
+            <p id="statTotal" class="text-2xl font-bold text-slate-900 mt-1">0</p>
+          </div>
+          <div class="bg-indigo-50 rounded-lg p-3">
+            <p class="text-xs text-indigo-700">Progresso médio</p>
+            <p id="statProgresso" class="text-2xl font-bold text-indigo-700 mt-1">0%</p>
+          </div>
+          <div class="bg-green-50 rounded-lg p-3">
+            <p class="text-xs text-green-700">Concluídas</p>
+            <p id="statConcluidas" class="text-2xl font-bold text-green-700 mt-1">0</p>
+          </div>
+          <div class="bg-red-50 rounded-lg p-3">
+            <p class="text-xs text-red-700">Atrasadas</p>
+            <p id="statAtrasadas" class="text-2xl font-bold text-red-700 mt-1">0</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-xl shadow-sm overflow-hidden overflow-x-auto">
+        <table class="w-full text-sm min-w-[720px]">
+          <thead class="bg-slate-50 text-slate-500 uppercase text-xs">
+            <tr>
+              <th class="text-left px-4 py-3">Tarefa</th>
+              <th class="text-left px-4 py-3">Início</th>
+              <th class="text-left px-4 py-3">Fim</th>
+              <th class="text-left px-4 py-3">Responsável</th>
+              <th class="text-left px-4 py-3">Progresso</th>
+              <th class="text-left px-4 py-3">Status</th>
+              <th class="text-right px-4 py-3">Ações</th>
+            </tr>
+          </thead>
+          <tbody id="tabelaDetalheTarefas" class="divide-y divide-slate-100"></tbody>
+        </table>
+      </div>
+    </section>
+  </section>
+
+  <!-- ABA CRONOGRAMA GERAL -->
+  <section id="tab-calendario" class="tab-content hidden">
+    <div class="bg-white rounded-xl shadow-sm p-4">
+      <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+        <div id="legendaProjetos" class="flex flex-wrap gap-3 text-xs"></div>
+        <div class="inline-flex gap-1 bg-slate-200/60 p-1 rounded-lg shrink-0">
+          <button data-cron-view="calendario" class="cron-view-btn active px-3 py-1.5 text-xs font-semibold transition">📅 Calendário</button>
+          <button data-cron-view="gantt" class="cron-view-btn px-3 py-1.5 text-xs font-semibold transition">📊 Gantt</button>
+        </div>
+      </div>
+
+      <div id="cronCalendarioView">
+        <div id="calendar"></div>
+      </div>
+
+      <div id="cronGanttView" class="hidden">
+        <p id="ganttVazio" class="hidden text-center py-16 text-slate-400 text-sm">Nenhuma tarefa cadastrada ainda. Crie um projeto com tarefas para ver o Gantt.</p>
+        <div id="ganttContainer" class="gantt-container"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ABA PAINEL DE CONTROLE -->
+  <section id="tab-tarefas" class="tab-content hidden">
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+      <div class="bg-white rounded-lg p-3 shadow-sm">
+        <p class="text-xs text-slate-500">Projetos</p>
+        <p id="painelTotalProjetos" class="text-2xl font-bold text-slate-900 mt-1">0</p>
+      </div>
+      <div class="bg-white rounded-lg p-3 shadow-sm">
+        <p class="text-xs text-slate-500">Tarefas</p>
+        <p id="painelTotalTarefas" class="text-2xl font-bold text-slate-900 mt-1">0</p>
+      </div>
+      <div class="bg-white rounded-lg p-3 shadow-sm">
+        <p class="text-xs text-green-700">Concluídas</p>
+        <p id="painelConcluidas" class="text-2xl font-bold text-green-700 mt-1">0</p>
+      </div>
+      <div class="bg-white rounded-lg p-3 shadow-sm">
+        <p class="text-xs text-red-700">Atrasadas</p>
+        <p id="painelAtrasadas" class="text-2xl font-bold text-red-700 mt-1">0</p>
+      </div>
+    </div>
+    <div class="bg-white rounded-xl shadow-sm overflow-hidden overflow-x-auto">
+      <table class="w-full text-sm min-w-[820px]">
+        <thead class="bg-slate-50 text-slate-500 uppercase text-xs">
+          <tr>
+            <th class="text-left px-4 py-3">Tarefa</th>
+            <th class="text-left px-4 py-3">Projeto</th>
+            <th class="text-left px-4 py-3">Responsável</th>
+            <th class="text-left px-4 py-3">Início</th>
+            <th class="text-left px-4 py-3">Fim</th>
+            <th class="text-left px-4 py-3">Progresso</th>
+            <th class="text-left px-4 py-3">Status</th>
+            <th class="text-right px-4 py-3">Ações</th>
+          </tr>
+        </thead>
+        <tbody id="tabelaTarefas" class="divide-y divide-slate-100"></tbody>
+      </table>
+    </div>
+  </section>
+
+</div>
+
+<!-- MODAL PROJETO -->
+<div id="modalProjeto" class="fixed inset-0 bg-black/40 hidden items-center justify-center z-50 p-4">
+  <div class="bg-white rounded-xl shadow-lg w-full max-w-md p-6 max-h-[90vh] overflow-y-auto">
+    <h2 id="modalProjetoTitulo" class="text-lg font-bold mb-4">Novo Projeto</h2>
+    <form id="formProjeto" class="space-y-3">
+      <input type="hidden" id="projetoId" />
+      <div>
+        <label class="text-xs font-medium text-slate-600">Nome do Projeto *</label>
+        <input required id="projetoNome" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm mt-1" />
+      </div>
+      <div>
+        <label class="text-xs font-medium text-slate-600">Descrição</label>
+        <textarea id="projetoDescricao" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm mt-1" rows="2"></textarea>
+      </div>
+      <div>
+        <label class="text-xs font-medium text-slate-600">Cliente / Responsável</label>
+        <input id="projetoResponsavel" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm mt-1" />
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="text-xs font-medium text-slate-600">Data Início *</label>
+          <input required type="date" id="projetoDataInicio" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm mt-1" />
+        </div>
+        <div>
+          <label class="text-xs font-medium text-slate-600">Prazo (Data Fim) *</label>
+          <input required type="date" id="projetoDataFim" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm mt-1" />
+        </div>
+      </div>
+      <div>
+        <label class="text-xs font-medium text-slate-600">Status</label>
+        <select id="projetoStatus" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm mt-1">
+          <option>Planejada</option>
+          <option>Em Andamento</option>
+          <option>Concluído</option>
+          <option>Atrasado</option>
+        </select>
+      </div>
+
+      <!-- Tarefas iniciais do projeto (somente na criação) -->
+      <div id="projetoTarefasSection" class="pt-2 border-t border-slate-200">
+        <div class="flex items-center justify-between mt-2">
+          <label class="text-xs font-medium text-slate-600">Tarefas do Projeto (opcional)</label>
+          <button type="button" id="btnAdicionarTarefaInline" class="text-xs font-medium text-indigo-600 hover:underline">+ Adicionar Tarefa</button>
+        </div>
+        <p class="text-[11px] text-slate-400 mt-0.5">Crie tarefas já junto com o projeto. Deixe em branco se preferir adicionar depois.</p>
+        <div id="listaTarefasInline" class="space-y-3 mt-2 max-h-64 overflow-y-auto pr-1"></div>
+      </div>
+
+      <div class="flex justify-end gap-2 pt-2">
+        <button type="button" onclick="fecharModal('modalProjeto')" class="px-4 py-2 text-sm rounded-lg border border-slate-300">Cancelar</button>
+        <button type="submit" class="px-4 py-2 text-sm rounded-lg bg-indigo-600 text-white">Salvar</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- MODAL TAREFA -->
+<div id="modalTarefa" class="fixed inset-0 bg-black/40 hidden items-center justify-center z-50 p-4">
+  <div class="bg-white rounded-xl shadow-lg w-full max-w-md p-6 max-h-[90vh] overflow-y-auto">
+    <h2 id="modalTarefaTitulo" class="text-lg font-bold mb-4">Nova Tarefa</h2>
+    <form id="formTarefa" class="space-y-3">
+      <input type="hidden" id="tarefaId" />
+      <div>
+        <label class="text-xs font-medium text-slate-600">Projeto *</label>
+        <select required id="tarefaProjetoId" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm mt-1"></select>
+      </div>
+      <div>
+        <label class="text-xs font-medium text-slate-600">Nome da Tarefa *</label>
+        <input required id="tarefaNome" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm mt-1" />
+      </div>
+      <div>
+        <label class="text-xs font-medium text-slate-600">Depende de (opcional)</label>
+        <select id="tarefaDependeDe" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm mt-1">
+          <option value="">Nenhuma</option>
+        </select>
+      </div>
+      <div>
+        <label class="text-xs font-medium text-slate-600">Responsável</label>
+        <input id="tarefaResponsavel" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm mt-1" />
+      </div>
+      <div>
+        <label class="text-xs font-medium text-slate-600">Dias para concluir</label>
+        <input type="number" min="1" step="1" id="tarefaDias" placeholder="Ex.: 10" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm mt-1" />
+        <p id="tarefaDiasAviso" class="text-[11px] text-slate-400 mt-1"></p>
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="text-xs font-medium text-slate-600">Data Início</label>
+          <input required type="date" id="tarefaDataInicio" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm mt-1" />
+        </div>
+        <div>
+          <label class="text-xs font-medium text-slate-600">Data Fim (prazo)</label>
+          <input required type="date" id="tarefaDataFim" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm mt-1" />
+        </div>
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="text-xs font-medium text-slate-600">Status</label>
+          <select id="tarefaStatus" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm mt-1">
+            <option>Pendente</option>
+            <option>Em Andamento</option>
+            <option>Concluído</option>
+            <option>Atrasado</option>
+          </select>
+        </div>
+        <div>
+          <label class="text-xs font-medium text-slate-600">Progresso (%)</label>
+          <input type="number" min="0" max="100" id="tarefaProgresso" value="0" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm mt-1" />
+        </div>
+      </div>
+      <div class="flex justify-end gap-2 pt-2">
+        <button type="button" onclick="fecharModal('modalTarefa')" class="px-4 py-2 text-sm rounded-lg border border-slate-300">Cancelar</button>
+        <button type="submit" class="px-4 py-2 text-sm rounded-lg bg-indigo-600 text-white">Salvar</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+const API = {
+  projetos: '/api/projetos',
+  tarefas: '/api/tarefas',
+  calendario: '/api/calendario',
+};
+
+let calendar;
+let gantt;
+let cronViewAtual = 'calendario'; // 'calendario' | 'gantt', dentro da aba "Cronograma Geral"
+let cacheProjetos = [];
+let projetoDetalheAtualId = null;
+
+// ---------- Utilidades ----------
+function abrirModal(id) {
+  const el = document.getElementById(id);
+  el.classList.remove('hidden');
+  el.classList.add('flex');
+}
+function fecharModal(id) {
+  const el = document.getElementById(id);
+  el.classList.add('hidden');
+  el.classList.remove('flex');
+}
+function badgeStatus(status) {
+  const cls = 'status-' + status.replace(' ', '-');
+  return `<span class="status-badge ${cls}">${status}</span>`;
+}
+function iconePencil() {
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>`;
+}
+function iconeTrash() {
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>`;
+}
+function progressoBarra(valor, cor, alto) {
+  const h = alto ? '' : 'sm';
+  return `
+    <div class="flex items-center gap-2">
+      <div class="progress-track ${h}" style="max-width:100px">
+        <div class="progress-fill" style="width:${valor}%; background:${cor}"></div>
+      </div>
+      <span class="text-xs text-slate-500">${valor}%</span>
+    </div>`;
+}
+async function api(url, options = {}) {
+  const resp = await fetch(url, {
+    headers: { 'Content-Type': 'application/json' },
+    ...options,
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(data.erro || 'Erro na requisição');
+  return data;
+}
+
+// ---------- Tabs ----------
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.add('hidden'));
+    document.getElementById('tab-' + btn.dataset.tab).classList.remove('hidden');
+
+    if (btn.dataset.tab === 'calendario') {
+      carregarCalendario();
+    } else if (btn.dataset.tab === 'projetos') {
+      carregarProjetos();
+    } else if (btn.dataset.tab === 'tarefas') {
+      carregarTarefas();
+    }
+  });
+});
+
+// ---------- Calendário ----------
+function iniciarCalendario() {
+  const calendarEl = document.getElementById('calendar');
+  calendar = new FullCalendar.Calendar(calendarEl, {
+    locale: 'pt-br',
+    height: 680,
+    headerToolbar: {
+      left: 'prev,next today',
+      center: 'title',
+      right: 'dayGridMonth,timeGridWeek,listMonth',
+    },
+    buttonText: { today: 'Hoje', month: 'Mês', week: 'Semana', list: 'Lista' },
+    events: async (info, successCallback, failureCallback) => {
+      try {
+        const eventos = await api(API.calendario);
+        successCallback(eventos);
+      } catch (e) {
+        failureCallback(e);
+      }
+    },
+    eventClick: (info) => {
+      const p = info.event.extendedProps;
+      alert(
+        `Tarefa: ${info.event.title}\n` +
+        `Projeto: ${p.projeto_nome}\n` +
+        `Responsável: ${p.responsavel || '-'}\n` +
+        `Progresso: ${p.progresso}%\n` +
+        `Status: ${p.status}`
+      );
+    },
+  });
+  calendar.render();
+}
+
+async function carregarCalendario() {
+  if (cronViewAtual === 'gantt') {
+    await carregarGantt();
+  } else if (calendar) {
+    calendar.refetchEvents();
+  }
+  await montarLegenda();
+}
+
+// ---------- Cronograma Geral: alternância Calendário / Gantt ----------
+document.querySelectorAll('.cron-view-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.cron-view-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    cronViewAtual = btn.dataset.cronView;
+
+    document.getElementById('cronCalendarioView').classList.toggle('hidden', cronViewAtual !== 'calendario');
+    document.getElementById('cronGanttView').classList.toggle('hidden', cronViewAtual !== 'gantt');
+
+    if (cronViewAtual === 'gantt') {
+      carregarGantt();
+    } else if (calendar) {
+      calendar.updateSize();
+    }
+  });
+});
+
+async function carregarGantt() {
+  const tarefas = await api(API.tarefas);
+  const container = document.getElementById('ganttContainer');
+  const vazio = document.getElementById('ganttVazio');
+
+  if (!tarefas.length) {
+    container.innerHTML = '';
+    vazio.classList.remove('hidden');
+    return;
+  }
+  vazio.classList.add('hidden');
+
+  // Frappe Gantt exige start <= end e ids únicos (strings).
+  const tarefasGantt = tarefas.map(t => ({
+    id: String(t.id),
+    name: `${t.nome} · ${t.projeto_nome}`,
+    start: t.data_inicio,
+    end: t.data_fim < t.data_inicio ? t.data_inicio : t.data_fim,
+    progress: t.progresso,
+    dependencies: t.depende_de_id ? String(t.depende_de_id) : '',
+    _info: t,
+  }));
+
+  container.innerHTML = '<div id="ganttSvgHost"></div>';
+
+  gantt = new Gantt('#ganttSvgHost', tarefasGantt, {
+    view_mode: 'Week',
+    view_mode_select: true,
+    readonly: true,
+    today_button: true,
+    popup: ({ task, set_title, set_subtitle, set_details }) => {
+      const info = task._info;
+      set_title(info.nome);
+      set_subtitle(`${info.projeto_nome} · ${info.status}`);
+      set_details(`
+        <div>Responsável: ${info.responsavel || '-'}</div>
+        <div>Período: ${formatarData(info.data_inicio)} → ${formatarData(info.data_fim)}</div>
+        <div>Progresso: ${info.progresso}%</div>
+        ${info.depende_de_nome ? `<div>Depende de: ${info.depende_de_nome}</div>` : ''}
+      `);
+    },
+  });
+
+  // Colore cada barra com a cor do projeto ao qual a tarefa pertence.
+  tarefasGantt.forEach(t => {
+    document.querySelectorAll(`.bar-wrapper[data-id="${t.id}"] .bar`).forEach(el => {
+      el.style.fill = t._info.cor;
+    });
+    document.querySelectorAll(`.bar-wrapper[data-id="${t.id}"] .bar-progress`).forEach(el => {
+      el.style.fill = t._info.cor;
+      el.style.opacity = '0.55';
+    });
+  });
+}
+
+async function montarLegenda() {
+  const projetos = await api(API.projetos);
+  cacheProjetos = projetos;
+  const legenda = document.getElementById('legendaProjetos');
+  legenda.innerHTML = projetos.map(p => `
+    <span class="flex items-center gap-1">
+      <span class="inline-block w-3 h-3 rounded-full" style="background:${p.cor}"></span>
+      ${p.nome}
+    </span>
+  `).join('');
+}
+
+// ---------- Tarefas inline (criadas junto com um novo projeto) ----------
+function linhaTarefaInlineHTML() {
+  return `
+    <div class="tarefa-inline-row border border-slate-200 rounded-lg p-3 bg-slate-50 space-y-2 relative">
+      <button type="button" class="absolute top-2 right-2 text-red-500 hover:text-red-700 text-xs font-bold" onclick="this.closest('.tarefa-inline-row').remove()" title="Remover tarefa">✕</button>
+      <div>
+        <label class="text-[11px] font-medium text-slate-500">Nome da Tarefa</label>
+        <input class="ti-nome w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm mt-0.5" placeholder="Ex.: Levantamento de requisitos" />
+      </div>
+      <div>
+        <label class="text-[11px] font-medium text-slate-500">Responsável</label>
+        <input class="ti-responsavel w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm mt-0.5" />
+      </div>
+      <div>
+        <label class="text-[11px] font-medium text-slate-500">Dias para concluir</label>
+        <input type="number" min="1" step="1" placeholder="Ex.: 10" class="ti-dias w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm mt-0.5" />
+        <p class="ti-aviso text-[11px] text-slate-400 mt-0.5"></p>
+      </div>
+      <div class="grid grid-cols-2 gap-2">
+        <div>
+          <label class="text-[11px] font-medium text-slate-500">Início</label>
+          <input type="date" class="ti-data-inicio w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm mt-0.5" />
+        </div>
+        <div>
+          <label class="text-[11px] font-medium text-slate-500">Fim (prazo)</label>
+          <input type="date" class="ti-data-fim w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm mt-0.5" />
+        </div>
+      </div>
+      <div class="grid grid-cols-2 gap-2">
+        <div>
+          <label class="text-[11px] font-medium text-slate-500">Status</label>
+          <select class="ti-status w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm mt-0.5">
+            <option>Pendente</option>
+            <option>Em Andamento</option>
+            <option>Concluído</option>
+            <option>Atrasado</option>
+          </select>
+        </div>
+        <div>
+          <label class="text-[11px] font-medium text-slate-500">Progresso (%)</label>
+          <input type="number" min="0" max="100" value="0" class="ti-progresso w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm mt-0.5" />
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function adicionarLinhaTarefaInline() {
+  const container = document.getElementById('listaTarefasInline');
+  const wrapper = document.createElement('div');
+  wrapper.innerHTML = linhaTarefaInlineHTML().trim();
+  container.appendChild(wrapper.firstElementChild);
+}
+
+function limparTarefasInline() {
+  document.getElementById('listaTarefasInline').innerHTML = '';
+}
+
+function coletarTarefasInline() {
+  const linhas = document.querySelectorAll('#listaTarefasInline .tarefa-inline-row');
+  const tarefas = [];
+  linhas.forEach(linha => {
+    const nome = linha.querySelector('.ti-nome').value.trim();
+    // Linhas sem nome preenchido são ignoradas (não viram tarefa).
+    if (!nome) return;
+    tarefas.push({
+      nome,
+      responsavel: linha.querySelector('.ti-responsavel').value.trim(),
+      dias_para_concluir: parseInt(linha.querySelector('.ti-dias').value, 10) || null,
+      data_inicio: linha.querySelector('.ti-data-inicio').value,
+      data_fim: linha.querySelector('.ti-data-fim').value,
+      status: linha.querySelector('.ti-status').value,
+      progresso: parseInt(linha.querySelector('.ti-progresso').value || '0', 10),
+    });
+  });
+  return tarefas;
+}
+
+document.getElementById('btnAdicionarTarefaInline').addEventListener('click', adicionarLinhaTarefaInline);
+
+// ---------- Cálculo de prazo a partir de "Dias para concluir" ----------
+// Datas ISO (YYYY-MM-DD) manipuladas em UTC para evitar problemas de fuso/horário de verão.
+function addDiasISO(iso, n) {
+  const [a, m, d] = iso.split('-').map(Number);
+  return new Date(Date.UTC(a, m - 1, d + n)).toISOString().slice(0, 10);
+}
+function mostrarAviso(el, msg, erro) {
+  el.textContent = msg;
+  el.classList.toggle('text-red-600', !!erro);
+  el.classList.toggle('font-medium', !!erro);
+  el.classList.toggle('text-slate-400', !erro);
+}
+
+function recalcularLinhaInline(linha) {
+  const dias = parseInt(linha.querySelector('.ti-dias').value, 10);
+  const ini = linha.querySelector('.ti-data-inicio');
+  const fim = linha.querySelector('.ti-data-fim');
+  const aviso = linha.querySelector('.ti-aviso');
+  const temDias = dias > 0;
+
+  fim.readOnly = temDias;
+  fim.classList.toggle('bg-slate-100', temDias);
+  if (!temDias) { mostrarAviso(aviso, '', false); return; }
+
+  const pIni = document.getElementById('projetoDataInicio').value;
+  const pFim = document.getElementById('projetoDataFim').value;
+  if (!pIni || !pFim) {
+    fim.value = '';
+    mostrarAviso(aviso, 'Informe as datas do projeto para calcular o prazo.', false);
+    return;
+  }
+  const inicio = ini.value || pIni;
+  const prazo = addDiasISO(inicio, dias - 1);
+  fim.value = prazo;
+  if (prazo > pFim) {
+    mostrarAviso(aviso, `Prazo (${formatarData(prazo)}) ultrapassa o fim do projeto (${formatarData(pFim)}).`, true);
+  } else {
+    mostrarAviso(aviso, `Início: ${formatarData(inicio)}${ini.value ? '' : ' (início do projeto)'} → prazo: ${formatarData(prazo)}`, false);
+  }
+}
+function recalcularTodasLinhasInline() {
+  document.querySelectorAll('#listaTarefasInline .tarefa-inline-row').forEach(recalcularLinhaInline);
+}
+document.getElementById('listaTarefasInline').addEventListener('input', (e) => {
+  if (e.target.matches('.ti-dias, .ti-data-inicio')) {
+    recalcularLinhaInline(e.target.closest('.tarefa-inline-row'));
+  }
+});
+['projetoDataInicio', 'projetoDataFim'].forEach(id =>
+  document.getElementById(id).addEventListener('input', recalcularTodasLinhasInline)
+);
+
+function recalcularPrazoTarefa() {
+  const diasEl = document.getElementById('tarefaDias');
+  const ini = document.getElementById('tarefaDataInicio');
+  const fim = document.getElementById('tarefaDataFim');
+  const aviso = document.getElementById('tarefaDiasAviso');
+  const dias = parseInt(diasEl.value, 10);
+  const temDias = dias > 0;
+
+  // Com dias informados, as datas deixam de ser obrigatórias e o prazo vira calculado.
+  ini.required = !temDias;
+  fim.required = !temDias;
+  fim.readOnly = temDias;
+  fim.classList.toggle('bg-slate-100', temDias);
+
+  if (!temDias) {
+    mostrarAviso(aviso, 'Opcional: informe os dias e o prazo será calculado automaticamente.', false);
+    return;
+  }
+  const projeto = cacheProjetos.find(p => String(p.id) === document.getElementById('tarefaProjetoId').value);
+  if (!projeto) { fim.value = ''; mostrarAviso(aviso, 'Selecione um projeto.', true); return; }
+
+  let inicio = ini.value;
+  let origem = '';
+  if (!inicio) {
+    const opt = document.getElementById('tarefaDependeDe').selectedOptions[0];
+    if (opt && opt.dataset.fim) { inicio = addDiasISO(opt.dataset.fim, 1); origem = ' (dia seguinte à predecessora)'; }
+    else { inicio = projeto.data_inicio; origem = ' (início do projeto)'; }
+  }
+  const prazo = addDiasISO(inicio, dias - 1);
+  fim.value = prazo;
+  if (prazo > projeto.data_fim) {
+    mostrarAviso(aviso, `Prazo (${formatarData(prazo)}) ultrapassa o fim do projeto (${formatarData(projeto.data_fim)}).`, true);
+  } else {
+    mostrarAviso(aviso, `Início: ${formatarData(inicio)}${origem} → prazo: ${formatarData(prazo)} · projeto termina em ${formatarData(projeto.data_fim)}`, false);
+  }
+}
+['tarefaDias', 'tarefaDataInicio'].forEach(id =>
+  document.getElementById(id).addEventListener('input', recalcularPrazoTarefa)
+);
+document.getElementById('tarefaDependeDe').addEventListener('change', recalcularPrazoTarefa);
+
+// ---------- Projetos (cards) ----------
+async function carregarProjetos() {
+  const projetos = await api(API.projetos);
+  cacheProjetos = projetos;
+  const grade = document.getElementById('gradeProjetos');
+
+  grade.innerHTML = projetos.map(p => `
+    <div class="projeto-card bg-white rounded-xl shadow-sm p-4 ${p.id === projetoDetalheAtualId ? 'selecionado' : ''}"
+         style="border-top-color:${p.cor}" onclick="verDetalhesProjeto(${p.id})">
+      <div class="flex items-start justify-between gap-2">
+        <div>
+          <h3 class="font-bold text-slate-900 leading-tight">${p.nome}</h3>
+          <p class="text-xs text-slate-500 mt-0.5">${p.responsavel || 'Sem responsável'}</p>
+        </div>
+        <button class="icon-btn shrink-0" title="Editar projeto" onclick="event.stopPropagation(); editarProjeto(${p.id})">${iconePencil()}</button>
+      </div>
+      <p class="text-xs text-slate-500 mt-3 flex items-center gap-1">📅 Prazo: ${formatarData(p.data_fim)}</p>
+      <div class="progress-track mt-2">
+        <div class="progress-fill" style="width:${p.progresso_medio}%; background:${p.cor}"></div>
+      </div>
+      <div class="flex items-center justify-between mt-2">
+        <span class="text-xs text-slate-500">${p.total_tarefas} tarefa(s) · ${p.progresso_medio}%</span>
+        ${badgeStatus(p.status)}
+      </div>
+    </div>
+  `).join('') || `<p class="text-sm text-slate-400 col-span-full text-center py-10">Nenhum projeto cadastrado ainda. Clique em "+ Novo projeto" para começar.</p>`;
+
+  await atualizarSelectProjetos();
+
+  // Mantém a view de detalhes sincronizada se um projeto estiver aberto.
+  if (projetoDetalheAtualId && projetos.some(p => p.id === projetoDetalheAtualId)) {
+    verDetalhesProjeto(projetoDetalheAtualId);
+  } else if (projetoDetalheAtualId) {
+    fecharDetalhesProjeto();
+  }
+}
+
+function formatarData(iso) {
+  if (!iso) return '-';
+  const [ano, mes, dia] = iso.split('-');
+  return `${dia}/${mes}/${ano}`;
+}
+
+// ---------- Detalhes do Projeto ----------
+async function verDetalhesProjeto(id) {
+  projetoDetalheAtualId = id;
+
+  const p = await api(`${API.projetos}/${id}`);
+  const tarefas = await api(`${API.tarefas}?projeto_id=${id}`);
+
+  document.getElementById('detProjDot').style.background = p.cor;
+  document.getElementById('detProjNome').innerText = p.nome;
+  document.getElementById('detProjResponsavel').innerText = p.responsavel || 'Sem responsável';
+  document.getElementById('detProjPeriodo').innerText = `Prazo: ${formatarData(p.data_fim)}`;
+
+  document.getElementById('statTotal').innerText = p.total_tarefas;
+  document.getElementById('statProgresso').innerText = `${p.progresso_medio}%`;
+  document.getElementById('statConcluidas').innerText = p.tarefas_concluidas;
+  document.getElementById('statAtrasadas').innerText = p.tarefas_atrasadas;
+
+  const tbody = document.getElementById('tabelaDetalheTarefas');
+  tbody.innerHTML = tarefas.map(t => `
+    <tr>
+      <td class="px-4 py-3 font-medium">
+        ${t.nome}
+        ${t.depende_de_nome ? `<span class="dep-badge">após: ${t.depende_de_nome}</span>` : ''}
+      </td>
+      <td class="px-4 py-3">${formatarData(t.data_inicio)}</td>
+      <td class="px-4 py-3">${formatarData(t.data_fim)}</td>
+      <td class="px-4 py-3">${t.responsavel || '-'}</td>
+      <td class="px-4 py-3">${progressoBarra(t.progresso, p.cor)}</td>
+      <td class="px-4 py-3">${badgeStatus(t.status)}</td>
+      <td class="px-4 py-3 text-right space-x-1 whitespace-nowrap">
+        <button onclick="editarTarefa(${t.id})" class="icon-btn" title="Editar">${iconePencil()}</button>
+        <button onclick="excluirTarefaDetalhe(${t.id})" class="icon-btn danger" title="Excluir">${iconeTrash()}</button>
+      </td>
+    </tr>
+  `).join('') || `<tr><td colspan="7" class="text-center py-6 text-slate-400">Nenhuma tarefa cadastrada para este projeto.</td></tr>`;
+
+  document.getElementById('detalhesProjeto').classList.remove('hidden');
+  document.querySelectorAll('.projeto-card').forEach(c => c.classList.remove('selecionado'));
+  document.getElementById('detalhesProjeto').scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+  // Realça o card selecionado.
+  carregarProjetosSemScroll();
+}
+
+async function carregarProjetosSemScroll() {
+  const projetos = cacheProjetos;
+  document.querySelectorAll('#gradeProjetos .projeto-card').forEach((card, idx) => {
+    const p = projetos[idx];
+    if (p && p.id === projetoDetalheAtualId) card.classList.add('selecionado');
+    else card.classList.remove('selecionado');
+  });
+}
+
+function fecharDetalhesProjeto() {
+  projetoDetalheAtualId = null;
+  document.getElementById('detalhesProjeto').classList.add('hidden');
+  document.querySelectorAll('.projeto-card').forEach(c => c.classList.remove('selecionado'));
+}
+
+async function excluirTarefaDetalhe(id) {
+  if (!confirm('Excluir esta tarefa?')) return;
+  await api(`${API.tarefas}/${id}`, { method: 'DELETE' });
+  carregarProjetos();
+  carregarCalendario();
+}
+
+document.getElementById('btnNovaTarefaDetalhe').addEventListener('click', async () => {
+  document.getElementById('formTarefa').reset();
+  document.getElementById('tarefaId').value = '';
+  document.getElementById('tarefaProgresso').value = 0;
+  document.getElementById('modalTarefaTitulo').innerText = 'Nova Tarefa';
+  await atualizarSelectProjetos();
+  if (projetoDetalheAtualId) {
+    document.getElementById('tarefaProjetoId').value = projetoDetalheAtualId;
+    await atualizarSelectDependencias(projetoDetalheAtualId);
+  }
+  recalcularPrazoTarefa();
+  abrirModal('modalTarefa');
+});
+
+// ---------- Download do Gantt do projeto ativo ----------
+function baixarArquivo(blob, nome) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = nome;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+function slugNome(t) {
+  return (t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-|-$/g, '').toLowerCase() || 'projeto';
+}
+async function baixarGantt(formato) {
+  if (!projetoDetalheAtualId) return;
+  const p = cacheProjetos.find(x => x.id === projetoDetalheAtualId);
+  const nome = 'gantt-' + slugNome(p ? p.nome : 'projeto');
+  try {
+    const resp = await fetch(`${API.projetos}/${projetoDetalheAtualId}/gantt`);
+    if (!resp.ok) {
+      const d = await resp.json().catch(() => ({}));
+      throw new Error(d.erro || 'Não foi possível gerar o Gantt.');
+    }
+    const svgTxt = await resp.text();
+
+    if (formato === 'svg') {
+      baixarArquivo(new Blob([svgTxt], { type: 'image/svg+xml' }), nome + '.svg');
+      return;
+    }
+
+    // PNG: desenha o SVG (autocontido) em um canvas com 2x de resolução.
+    const raiz = new DOMParser().parseFromString(svgTxt, 'image/svg+xml').documentElement;
+    const w = parseFloat(raiz.getAttribute('width'));
+    const h = parseFloat(raiz.getAttribute('height'));
+    const urlSvg = URL.createObjectURL(new Blob([svgTxt], { type: 'image/svg+xml;charset=utf-8' }));
+    const img = new Image();
+    await new Promise((ok, erro) => {
+      img.onload = ok;
+      img.onerror = () => erro(new Error('Falha ao renderizar o Gantt.'));
+      img.src = urlSvg;
+    });
+    const canvas = document.createElement('canvas');
+    canvas.width = w * 2;
+    canvas.height = h * 2;
+    const ctx = canvas.getContext('2d');
+    ctx.scale(2, 2);
+    ctx.drawImage(img, 0, 0, w, h);
+    URL.revokeObjectURL(urlSvg);
+    const blob = await new Promise(r => canvas.toBlob(r, 'image/png'));
+    baixarArquivo(blob, nome + '.png');
+  } catch (err) {
+    alert(err.message);
+  }
+}
+document.getElementById('btnGanttPng').addEventListener('click', () => baixarGantt('png'));
+document.getElementById('btnGanttSvg').addEventListener('click', () => baixarGantt('svg'));
+
+document.getElementById('btnEditarProjetoDetalhe').addEventListener('click', () => {
+  if (projetoDetalheAtualId) editarProjeto(projetoDetalheAtualId);
+});
+
+async function atualizarSelectProjetos() {
+  const select = document.getElementById('tarefaProjetoId');
+  const projetos = cacheProjetos.length ? cacheProjetos : await api(API.projetos);
+  select.innerHTML = projetos.map(p => `<option value="${p.id}">${p.nome}</option>`).join('');
+}
+
+document.getElementById('tarefaProjetoId').addEventListener('change', (e) => {
+  atualizarSelectDependencias(e.target.value);
+});
+
+async function atualizarSelectDependencias(projetoId, tarefaAtualId = null) {
+  const select = document.getElementById('tarefaDependeDe');
+  const tarefas = await api(`${API.tarefas}?projeto_id=${projetoId}`);
+  const opcoes = tarefas.filter(t => t.id !== tarefaAtualId);
+  select.innerHTML = '<option value="">Nenhuma</option>' +
+    opcoes.map(t => `<option value="${t.id}" data-fim="${t.data_fim}">${t.nome}</option>`).join('');
+  recalcularPrazoTarefa();
+}
+
+document.getElementById('btnNovoProjeto').addEventListener('click', () => {
+  document.getElementById('formProjeto').reset();
+  document.getElementById('projetoId').value = '';
+  document.getElementById('modalProjetoTitulo').innerText = 'Novo Projeto';
+
+  // Ao criar um novo projeto, exibe a seção de tarefas iniciais
+  // com uma linha em branco pronta para preenchimento.
+  document.getElementById('projetoTarefasSection').classList.remove('hidden');
+  limparTarefasInline();
+  adicionarLinhaTarefaInline();
+
+  abrirModal('modalProjeto');
+});
+
+async function editarProjeto(id) {
+  const p = await api(`${API.projetos}/${id}`);
+  document.getElementById('projetoId').value = p.id;
+  document.getElementById('projetoNome').value = p.nome;
+  document.getElementById('projetoDescricao').value = p.descricao || '';
+  document.getElementById('projetoResponsavel').value = p.responsavel || '';
+  document.getElementById('projetoDataInicio').value = p.data_inicio;
+  document.getElementById('projetoDataFim').value = p.data_fim;
+  document.getElementById('projetoStatus').value = p.status;
+  document.getElementById('modalProjetoTitulo').innerText = 'Editar Projeto';
+
+  // Criação de tarefas em lote só se aplica à criação de um projeto novo;
+  // ao editar, as tarefas existentes são gerenciadas na view de detalhes.
+  document.getElementById('projetoTarefasSection').classList.add('hidden');
+  limparTarefasInline();
+
+  abrirModal('modalProjeto');
+}
+
+async function excluirProjeto(id) {
+  if (!confirm('Excluir este projeto e todas as suas tarefas?')) return;
+  await api(`${API.projetos}/${id}`, { method: 'DELETE' });
+  if (projetoDetalheAtualId === id) fecharDetalhesProjeto();
+  carregarProjetos();
+  carregarCalendario();
+}
+
+document.getElementById('formProjeto').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const id = document.getElementById('projetoId').value;
+  const payload = {
+    nome: document.getElementById('projetoNome').value,
+    descricao: document.getElementById('projetoDescricao').value,
+    responsavel: document.getElementById('projetoResponsavel').value,
+    data_inicio: document.getElementById('projetoDataInicio').value,
+    data_fim: document.getElementById('projetoDataFim').value,
+    status: document.getElementById('projetoStatus').value,
+  };
+  try {
+    if (id) {
+      await api(`${API.projetos}/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+    } else {
+      // Ao criar um projeto novo, envia junto as tarefas preenchidas
+      // na seção inline do modal (se houver alguma).
+      payload.tarefas = coletarTarefasInline();
+      await api(API.projetos, { method: 'POST', body: JSON.stringify(payload) });
+    }
+    fecharModal('modalProjeto');
+    carregarProjetos();
+    carregarCalendario();
+  } catch (err) {
+    alert(err.message);
+  }
+});
+
+// ---------- Painel de Controle (todas as tarefas) ----------
+async function carregarTarefas() {
+  const tarefas = await api(API.tarefas);
+
+  document.getElementById('painelTotalProjetos').innerText = cacheProjetos.length || (await api(API.projetos)).length;
+  document.getElementById('painelTotalTarefas').innerText = tarefas.length;
+  document.getElementById('painelConcluidas').innerText = tarefas.filter(t => t.status === 'Concluído').length;
+  document.getElementById('painelAtrasadas').innerText = tarefas.filter(t => t.status === 'Atrasado').length;
+
+  const tbody = document.getElementById('tabelaTarefas');
+  tbody.innerHTML = tarefas.map(t => `
+    <tr>
+      <td class="px-4 py-3 font-medium">
+        ${t.nome}
+        ${t.depende_de_nome ? `<span class="dep-badge">após: ${t.depende_de_nome}</span>` : ''}
+      </td>
+      <td class="px-4 py-3">
+        <span class="inline-flex items-center gap-1">
+          <span class="inline-block w-2.5 h-2.5 rounded-full" style="background:${t.cor}"></span>
+          ${t.projeto_nome}
+        </span>
+      </td>
+      <td class="px-4 py-3">${t.responsavel || '-'}</td>
+      <td class="px-4 py-3">${formatarData(t.data_inicio)}</td>
+      <td class="px-4 py-3">${formatarData(t.data_fim)}</td>
+      <td class="px-4 py-3">${progressoBarra(t.progresso, t.cor)}</td>
+      <td class="px-4 py-3">${badgeStatus(t.status)}</td>
+      <td class="px-4 py-3 text-right space-x-1 whitespace-nowrap">
+        <button onclick="editarTarefa(${t.id})" class="icon-btn" title="Editar">${iconePencil()}</button>
+        <button onclick="excluirTarefa(${t.id})" class="icon-btn danger" title="Excluir">${iconeTrash()}</button>
+      </td>
+    </tr>
+  `).join('') || `<tr><td colspan="8" class="text-center py-6 text-slate-400">Nenhuma tarefa cadastrada.</td></tr>`;
+}
+
+async function editarTarefa(id) {
+  const t = await api(`${API.tarefas}/${id}`);
+  await atualizarSelectProjetos();
+  document.getElementById('tarefaId').value = t.id;
+  document.getElementById('tarefaProjetoId').value = t.projeto_id;
+  await atualizarSelectDependencias(t.projeto_id, t.id);
+  document.getElementById('tarefaDependeDe').value = t.depende_de_id || '';
+  document.getElementById('tarefaNome').value = t.nome;
+  document.getElementById('tarefaResponsavel').value = t.responsavel || '';
+  document.getElementById('tarefaDataInicio').value = t.data_inicio;
+  document.getElementById('tarefaDataFim').value = t.data_fim;
+  document.getElementById('tarefaStatus').value = t.status;
+  document.getElementById('tarefaProgresso').value = t.progresso;
+  document.getElementById('modalTarefaTitulo').innerText = 'Editar Tarefa';
+  document.getElementById('tarefaDias').value = '';
+  recalcularPrazoTarefa();
+  abrirModal('modalTarefa');
+}
+
+async function excluirTarefa(id) {
+  if (!confirm('Excluir esta tarefa?')) return;
+  await api(`${API.tarefas}/${id}`, { method: 'DELETE' });
+  carregarTarefas();
+  carregarCalendario();
+  if (projetoDetalheAtualId) carregarProjetos();
+}
+
+document.getElementById('formTarefa').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const id = document.getElementById('tarefaId').value;
+  const payload = {
+    projeto_id: document.getElementById('tarefaProjetoId').value,
+    nome: document.getElementById('tarefaNome').value,
+    responsavel: document.getElementById('tarefaResponsavel').value,
+    data_inicio: document.getElementById('tarefaDataInicio').value,
+    data_fim: document.getElementById('tarefaDataFim').value,
+    dias_para_concluir: parseInt(document.getElementById('tarefaDias').value, 10) || null,
+    status: document.getElementById('tarefaStatus').value,
+    progresso: parseInt(document.getElementById('tarefaProgresso').value || '0', 10),
+    depende_de_id: document.getElementById('tarefaDependeDe').value || null,
+  };
+  try {
+    if (id) {
+      await api(`${API.tarefas}/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+    } else {
+      await api(API.tarefas, { method: 'POST', body: JSON.stringify(payload) });
+    }
+    fecharModal('modalTarefa');
+    carregarProjetos();
+    carregarCalendario();
+    carregarTarefas();
+  } catch (err) {
+    alert(err.message);
+  }
+});
+
+// ---------- Inicialização ----------
+(async function init() {
+  iniciarCalendario();
+  await montarLegenda();
+  await atualizarSelectProjetos();
+  await carregarProjetos();
+})();
+</script>
+
+</body>
+</html>
