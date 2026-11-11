@@ -24,8 +24,8 @@ Funcionalidades:
 ------------------------------------------------------------
 """
 
+import os
 import re
-import sqlite3
 import unicodedata
 from datetime import date, datetime, timedelta
 from xml.sax.saxutils import escape
@@ -37,8 +37,29 @@ from flask_sqlalchemy import SQLAlchemy
 # Configuração básica
 # ------------------------------------------------------------------
 app = Flask(__name__)
-app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///cronograma.db"
+
+
+def obter_database_url() -> str:
+    """
+    Retorna a URL do banco. No Railway, a variável DATABASE_URL é injetada
+    pelo serviço PostgreSQL. Localmente, cai para SQLite (cronograma.db).
+    """
+    url = os.environ.get("DATABASE_URL", "").strip()
+    if not url:
+        return "sqlite:///cronograma.db"
+    # Railway/Heroku podem entregar "postgres://", que o SQLAlchemy 1.4+
+    # não aceita. Também fixamos o driver psycopg2.
+    if url.startswith("postgres://"):
+        url = "postgresql+psycopg2://" + url[len("postgres://"):]
+    elif url.startswith("postgresql://"):
+        url = "postgresql+psycopg2://" + url[len("postgresql://"):]
+    return url
+
+
+app.config["SQLALCHEMY_DATABASE_URI"] = obter_database_url()
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+# Evita erros de conexão "morta" após o Postgres do Railway ficar ocioso.
+app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {"pool_pre_ping": True, "pool_recycle": 300}
 
 db = SQLAlchemy(app)
 
@@ -82,6 +103,10 @@ class Projeto(db.Model):
     responsavel = db.Column(db.String(120), nullable=True)
     status = db.Column(db.String(30), nullable=False, default="Planejada")
 
+    __table_args__ = (
+        db.CheckConstraint("data_fim >= data_inicio", name="ck_projetos_datas"),
+    )
+
     tarefas = db.relationship(
         "Tarefa",
         backref="projeto",
@@ -119,7 +144,8 @@ class Tarefa(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     projeto_id = db.Column(
-        db.Integer, db.ForeignKey("projetos.id"), nullable=False
+        db.Integer, db.ForeignKey("projetos.id", ondelete="CASCADE"),
+        nullable=False, index=True,
     )
     nome = db.Column(db.String(150), nullable=False)
     responsavel = db.Column(db.String(120), nullable=True)
@@ -130,10 +156,16 @@ class Tarefa(db.Model):
 
     # Dependência opcional de outra tarefa do mesmo projeto (predecessora).
     depende_de_id = db.Column(
-        db.Integer, db.ForeignKey("tarefas.id"), nullable=True
+        db.Integer, db.ForeignKey("tarefas.id", ondelete="SET NULL"),
+        nullable=True, index=True,
     )
     depende_de = db.relationship(
         "Tarefa", remote_side=[id], foreign_keys=[depende_de_id]
+    )
+
+    __table_args__ = (
+        db.CheckConstraint("data_fim >= data_inicio", name="ck_tarefas_datas"),
+        db.CheckConstraint("progresso BETWEEN 0 AND 100", name="ck_tarefas_progresso"),
     )
 
     def to_dict(self):
@@ -851,26 +883,24 @@ def calendario_eventos():
 
 
 # ------------------------------------------------------------------
-# Inicialização do banco de dados
+# Inicialização do banco de dados (SQLite local ou PostgreSQL no Railway)
 # ------------------------------------------------------------------
-from sqlalchemy import text
+from sqlalchemy import inspect, text
+
 
 def migrar_colunas_faltantes():
-    """Garante que as novas colunas existam na tabela tarefas."""
-    with db.engine.connect() as conn:
-        # Adiciona progresso caso nao exista
-        try:
-            conn.execute(text("ALTER TABLE tarefas ADD COLUMN progresso INTEGER DEFAULT 0"))
-            conn.commit()
-        except Exception:
-            pass
-
-        # Adiciona depende_de_id caso nao exista
-        try:
-            conn.execute(text("ALTER TABLE tarefas ADD COLUMN depende_de_id INTEGER REFERENCES tarefas(id)"))
-            conn.commit()
-        except Exception:
-            pass
+    """
+    Garante que colunas adicionadas depois existam na tabela tarefas
+    (bancos antigos). Usa o inspector, então funciona em SQLite e PostgreSQL.
+    """
+    colunas = {c["name"] for c in inspect(db.engine).get_columns("tarefas")}
+    with db.engine.begin() as conn:
+        if "progresso" not in colunas:
+            conn.execute(text("ALTER TABLE tarefas ADD COLUMN progresso INTEGER NOT NULL DEFAULT 0"))
+        if "depende_de_id" not in colunas:
+            conn.execute(text(
+                "ALTER TABLE tarefas ADD COLUMN depende_de_id INTEGER REFERENCES tarefas(id) ON DELETE SET NULL"
+            ))
 
 
 def inicializar_banco():
@@ -881,8 +911,11 @@ def inicializar_banco():
         atualizar_tarefas_atrasadas()
 
 
-import os
+# Executa na importação para funcionar também com gunicorn (Railway),
+# onde o bloco __main__ abaixo não roda.
+inicializar_banco()
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port)
+    app.run(host="0.0.0.0", port=port)
